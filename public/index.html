@@ -75,9 +75,7 @@
 
     <script>
       async function loadOptions() {
-        const res = await fetch(
-          "https://generate-sample.onrender.com/options?" + new Date().getTime()
-        ); // cache-buster
+        const res = await fetch("/options?" + new Date().getTime()); // cache-buster
         const options = await res.json();
         const select = document.getElementById("docType");
         select.innerHTML = "";
@@ -110,14 +108,11 @@
         }, 400);
 
         try {
-          const res = await fetch(
-            "https://generate-sample.onrender.com/generate",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ type, sample }),
-            }
-          );
+          const res = await fetch("/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type, sample }),
+          });
 
           if (!res.ok) throw new Error("Failed request");
 
