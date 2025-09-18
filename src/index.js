@@ -1,6 +1,8 @@
 // index.js
 import express from "express";
 import bodyParser from "body-parser";
+import path from "path";
+import { fileURLToPath } from "url";
 
 import { generatePANcards } from "./generate/pan.js";
 import { generateRationCards } from "./generate/rationcard.js";
@@ -16,6 +18,9 @@ import { generateRentalAgreements } from "./generate/rentalagreement.js";
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 app.use(bodyParser.json());
 app.use(express.static("public"));
@@ -63,7 +68,7 @@ const docHandlers = Object.fromEntries(
 
 // Routes
 app.get("/", (_, res) => {
-  res.send("🚀 Document Generator API is running!");
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.get("/options", (_, res) => {

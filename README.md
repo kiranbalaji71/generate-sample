@@ -2,6 +2,10 @@
 
 A web-based document generator built with **Node.js** and **Express**, featuring multiple document types like PAN cards, Ration Cards, Gas Bills, Birth Certificates, Employment Letters, and more. Users can select the type of document, specify the number of samples, and download them as a ZIP file.
 
+You can access the app here: [Live App](https://generate-sample.onrender.com/)
+
+Check the source code on GitHub: [GitHub Repo](https://github.com/kiranbalaji71/generate-sample.git)
+
 ---
 
 ## Features
