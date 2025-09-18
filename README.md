@@ -55,21 +55,26 @@ The server will start at [http://localhost:8000](http://localhost:8000).
 
 ```
 .
-├── index.js                  # Main server file
-├── public/                   # Frontend files (HTML, CSS, JS)
+├── public/                      # Frontend files (HTML, CSS, JS)
 │   └── index.html
-├── generate/                 # Document generation scripts
-│   ├── pan.js
-│   ├── rationcard.js
-│   ├── gasbill.js
-│   ├── ebbills.js
-│   ├── birthcertification.js
-│   ├── employmentletter.js
-│   ├── grn.js
-│   ├── purchaseorder.js
-│   ├── vehiclerc.js
-│   ├── salaryslip.js
-│   └── rentalagreement.js
+├── src/
+│   ├── index.js                 # Main server file
+│   ├── fonts/
+│   ├── generate/                # Document generation scripts
+│   │   ├── pan.js
+│   │   ├── rationcard.js
+│   │   ├── gasbill.js
+│   │   ├── ebbills.js
+│   │   ├── birthcertification.js
+│   │   ├── employmentletter.js
+│   │   ├── grn.js
+│   │   ├── purchaseorder.js
+│   │   ├── vehiclerc.js
+│   │   ├── salaryslip.js
+│   │   └── rentalagreement.js
+│   ├── helper/
+│   └── templates/
+├── package.json
 └── README.md
 ```
 
