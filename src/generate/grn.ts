@@ -1,86 +1,112 @@
-// routes/generate_grn.js
 import fs from "fs";
 import path from "path";
 import { createCanvas, loadImage } from "canvas";
 import { fileURLToPath } from "url";
+import { Response } from "express";
+import { z } from "zod";
 import { zipImages } from "../helper/common.js";
+import { GeneratorPayload, GRNData } from "../types/index.js";
+import { generateAIData, isAIConfigured } from "../lib/ai.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Output folder for images
 const outputDir = path.join(__dirname, "../../output", "samples");
-if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir, { recursive: true });
-}
+if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-// Sample data
+// Fallback data
 const companies = [
   "TechWorld Pvt Ltd",
   "UrbanEdge Supplies",
   "NextGen Industries",
-  "BrightWave Solutions",
-  "Summit Business Corp",
 ];
-
-const cityPinPrefixes = {
+const cityPinPrefixes: Record<string, string> = {
   Chennai: "60",
   Bengaluru: "56",
   Mumbai: "40",
   Hyderabad: "50",
-  Delhi: "11",
-  Pune: "41",
-  Kolkata: "70",
 };
 
-const itemsCatalog = {
+type ItemTemplate = { description: string; unit_price: number };
+const itemsCatalog: Record<string, ItemTemplate[]> = {
   Electronics: [
     { description: "Dell Laptop Inspiron 15", unit_price: 45000 },
     { description: "HP Laser Printer", unit_price: 18000 },
-    { description: "Logitech Wireless Mouse", unit_price: 800 },
-    { description: "Samsung 24-inch Monitor", unit_price: 12000 },
-    { description: "External Hard Drive 1TB", unit_price: 5000 },
   ],
   Furniture: [
     { description: "Office Chair Ergonomic", unit_price: 7500 },
     { description: "Wooden Desk", unit_price: 15000 },
-    { description: "Steel Filing Cabinet", unit_price: 8500 },
-    { description: "Conference Table", unit_price: 22000 },
-    { description: "Visitor Sofa Set", unit_price: 30000 },
-  ],
-  Stationery: [
-    { description: "A4 Paper Ream (500 sheets)", unit_price: 350 },
-    { description: "Ballpoint Pens (Pack of 10)", unit_price: 120 },
-    { description: "Notebooks (Set of 5)", unit_price: 450 },
-    { description: "Whiteboard Markers (Pack of 4)", unit_price: 200 },
-    { description: "Stapler with Pins", unit_price: 180 },
   ],
 };
 
-// Helpers
-function randomChoice(arr) {
+function randomChoice<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
-function generatePincode(city) {
+function generatePincode(city: string): string {
   const prefix = cityPinPrefixes[city] || "50";
   const suffix = String(Math.floor(1000 + Math.random() * 8999));
   return `${prefix}${suffix}`;
 }
-function addDays(date, days) {
+function addDays(date: Date, days: number): Date {
   const newDate = new Date(date);
   newDate.setDate(newDate.getDate() + days);
   return newDate;
 }
-function generateWebsite(companyName) {
+function generateWebsite(companyName: string): string {
   const slug = companyName.toLowerCase().replace(/\s+/g, "");
   return `www.${slug}.com`;
 }
-function generateGRNData(count) {
-  const data = [];
+
+// AI generation
+async function generateGRNDataAI(count: number): Promise<GRNData[]> {
+  const schema = z.object({
+    company_name: z.string().describe("Company name"),
+    company_website: z.string().describe("Company website URL"),
+    grn_no: z.string().describe("GRN number like GRN-2025-001"),
+    date: z
+      .string()
+      .regex(/^\d{2}\/\d{2}\/\d{4}$/)
+      .describe("Date in DD/MM/YYYY"),
+    supplier_name: z.string().describe("Supplier company name"),
+    supplier_address: z.string().describe("Supplier street address"),
+    supplier_city: z.string().describe("Supplier city"),
+    supplier_pincode: z.string().describe("6-digit pincode"),
+    po_no: z.string().describe("Purchase order number like PO-2025-001"),
+    carrier_name: z.string().describe("Logistics carrier name"),
+    delivery_address: z.string().describe("Delivery street address"),
+    delivery_city: z.string().describe("Delivery city"),
+    delivery_pincode: z.string().describe("6-digit pincode"),
+    delivery_date: z
+      .string()
+      .regex(/^\d{2}\/\d{2}\/\d{4}$/)
+      .describe("Delivery date in DD/MM/YYYY"),
+    items: z
+      .array(
+        z.object({
+          no: z.number().describe("Item number"),
+          description: z.string().describe("Item description"),
+          ordered: z.number().describe("Quantity ordered"),
+          received: z.number().describe("Quantity received"),
+          amount: z.number().describe("Total amount for this item"),
+        })
+      )
+      .describe("Array of 2-4 items"),
+    total_amount: z.number().describe("Total amount for all items"),
+    payment_method: z.enum(["Debit Card", "Credit Card", "Net Banking", "UPI"]),
+  });
+
+  return await generateAIData(
+    schema,
+    "Indian Goods Receipt Note (GRN) with realistic supplier and delivery details",
+    count
+  );
+}
+
+// Fallback generation
+function generateGRNDataFallback(count: number): GRNData[] {
+  const data: GRNData[] = [];
   for (let i = 1; i <= count; i++) {
     const company = randomChoice(companies);
     const companyWebsite = generateWebsite(company);
-
     const grnNo = `GRN-2025-${String(i).padStart(3, "0")}`;
     const today = new Date();
     const deliveryDate = addDays(today, Math.floor(Math.random() * 10) + 1);
@@ -102,7 +128,7 @@ function generateGRNData(count) {
     const categories = Object.keys(itemsCatalog);
     const selectedCategory = randomChoice(categories);
     const catalog = itemsCatalog[selectedCategory];
-    const itemCount = Math.floor(Math.random() * 3) + 2;
+    const itemCount = Math.floor(Math.random() * 2) + 2;
     const shuffledItems = [...catalog].sort(() => 0.5 - Math.random());
     const selectedItems = shuffledItems.slice(0, itemCount);
 
@@ -149,20 +175,20 @@ function generateGRNData(count) {
   return data;
 }
 
-// Generate one GRN image
-async function generateSingleGRN(data, index) {
+async function generateSingleGRN(
+  data: GRNData,
+  index: number
+): Promise<string> {
   const baseImage = await loadImage(
     path.join(__dirname, "../templates", "grn-sample-template.png")
   );
   const signatureImage = await loadImage(
     path.join(__dirname, "../templates", "signature.png")
   );
-
   const canvas = createCanvas(baseImage.width, baseImage.height);
   const ctx = canvas.getContext("2d");
 
   ctx.drawImage(baseImage, 0, 0, baseImage.width, baseImage.height);
-
   ctx.font = "bold 28px Arial, sans-serif";
   ctx.fillStyle = "black";
 
@@ -199,31 +225,45 @@ async function generateSingleGRN(data, index) {
   });
 
   ctx.fillText(`₹ ${data.total_amount}`, 1119, 1350);
-
   ctx.font = "bold 20px Arial, sans-serif";
   ctx.fillStyle = "grey";
   ctx.fillText(data.payment_method, 355, 1450);
-
   ctx.drawImage(signatureImage, 150, 1500, 300, 150);
 
   const outputPath = path.join(outputDir, `grn_${index + 1}.png`);
-  const buffer = canvas.toBuffer("image/png");
-  fs.writeFileSync(outputPath, buffer);
-
+  fs.writeFileSync(outputPath, canvas.toBuffer("image/png"));
   return outputPath;
 }
 
-// Main API
-export const generateGRN = async (payload, res) => {
-  // Clear old files
+export const generateGRN = async (
+  payload: GeneratorPayload,
+  res: Response
+): Promise<void> => {
   if (fs.existsSync(outputDir)) {
     fs.readdirSync(outputDir).forEach((f) =>
       fs.unlinkSync(path.join(outputDir, f))
     );
   }
   try {
-    const sample = parseInt(payload.sample) || 50;
-    const records = generateGRNData(Number(sample));
+    const sample =
+      typeof payload.sample === "string"
+        ? parseInt(payload.sample)
+        : payload.sample || 50;
+
+    let records: GRNData[];
+    if (isAIConfigured()) {
+      console.log("🤖 Generating GRN data using AI...");
+      try {
+        records = await generateGRNDataAI(sample as number);
+        console.log("✅ AI generation successful");
+      } catch (aiError) {
+        console.warn("⚠️ AI generation failed, using fallback", aiError);
+        records = generateGRNDataFallback(sample as number);
+      }
+    } else {
+      console.log("ℹ️ AI not configured, using fallback");
+      records = generateGRNDataFallback(sample as number);
+    }
 
     for (let i = 0; i < records.length; i++) {
       await generateSingleGRN(records[i], i);

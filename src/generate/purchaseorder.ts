@@ -1,47 +1,37 @@
-// generate_purchase_orders.js
 import fs from "fs";
 import path from "path";
 import { createCanvas, loadImage } from "canvas";
 import { fileURLToPath } from "url";
+import { Response } from "express";
+import { z } from "zod";
 import { zipImages } from "../helper/common.js";
+import { GeneratorPayload, PurchaseOrderData } from "../types/index.js";
+import { generateAIData, isAIConfigured } from "../lib/ai.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Ensure output dir exists
 const outputDir = path.join(__dirname, "../../output", "samples");
-if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir, { recursive: true });
-}
+if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-// ---- Sample Data ----
+// Fallback data
 const supplierCompanies = [
   "Supplier Company Pvt Ltd",
   "Global Traders Ltd",
   "TechWorld Distributors",
-  "Future Supplies Inc",
-  "UrbanEdge Suppliers",
 ];
-
 const buyerCompanies = [
   "Your Company Name",
   "BrightWave Solutions",
   "Vertex Enterprises",
-  "NextGen Industries",
-  "Summit Business Corp",
 ];
-
-const cityPinPrefixes = {
+const cityPinPrefixes: Record<string, string> = {
   Chennai: "60",
   Bengaluru: "56",
   Mumbai: "40",
   Hyderabad: "50",
-  Delhi: "11",
-  Pune: "41",
-  Kolkata: "70",
 };
 
-function generatePincode(city) {
+function generatePincode(city: string): string {
   const prefix = cityPinPrefixes[city] || "50";
   const suffix = String(Math.floor(1000 + Math.random() * 8999));
   return `${prefix}${suffix}`;
@@ -50,27 +40,22 @@ function generatePincode(city) {
 const itemsCatalog = [
   { description: "Dell Laptop Inspiron 15", unit_price: 45000 },
   { description: "HP Laser Printer", unit_price: 18000 },
-  { description: "Logitech Wireless Mouse", unit_price: 800 },
-  { description: "Samsung 24-inch Monitor", unit_price: 12000 },
   { description: "Office Chair Ergonomic", unit_price: 7500 },
-  { description: "External Hard Drive 1TB", unit_price: 5000 },
 ];
 
-// Helpers
-function randomChoice(arr) {
+function randomChoice<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
-function generateAddress(city) {
-  const streets = [
-    "Anna Salai",
-    "MGR Road",
-    "MG Road",
-    "Connaught Place",
-    "Whitefield",
-    "Banjara Hills",
-    "Park Street",
-    "Andheri West",
-  ];
+
+type Address = {
+  street: string;
+  city: string;
+  country: string;
+  pincode: string;
+};
+
+function generateAddress(city: string): Address {
+  const streets = ["Anna Salai", "MGR Road", "MG Road", "Whitefield"];
   return {
     street: randomChoice(streets),
     city,
@@ -78,26 +63,87 @@ function generateAddress(city) {
     pincode: generatePincode(city),
   };
 }
-function addDays(date, days) {
+
+function addDays(date: Date, days: number): Date {
   const d = new Date(date);
   d.setDate(d.getDate() + days);
   return d;
 }
 
-// ---- Data Generator ----
-function generatePOs(n = 5) {
-  const data = [];
+// AI generation
+async function generatePOsAI(n: number): Promise<PurchaseOrderData[]> {
+  const schema = z.object({
+    po_number: z.string().describe("PO number like PO-2025-001"),
+    po_date: z
+      .string()
+      .regex(/^\d{2}\/\d{2}\/\d{4}$/)
+      .describe("PO date in DD/MM/YYYY"),
+    issue_date: z
+      .string()
+      .regex(/^\d{2}\/\d{2}\/\d{4}$/)
+      .describe("Issue date in DD/MM/YYYY"),
+    buyer: z.object({
+      name: z.string().describe("Buyer company name"),
+      street: z.string().describe("Street address"),
+      city: z.string().describe("City"),
+      country: z.string().describe("Country (India)"),
+      pincode: z.string().describe("6-digit pincode"),
+    }),
+    supplier: z.object({
+      name: z.string().describe("Supplier company name"),
+      street: z.string().describe("Street address"),
+      city: z.string().describe("City"),
+      country: z.string().describe("Country (India)"),
+      pincode: z.string().describe("6-digit pincode"),
+    }),
+    items: z
+      .array(
+        z.object({
+          no: z.number().describe("Item number"),
+          description: z.string().describe("Item description"),
+          quantity: z.number().describe("Quantity ordered"),
+          unit_price: z.number().describe("Unit price"),
+          amount: z.number().describe("Total amount (quantity * unit_price)"),
+        })
+      )
+      .describe("Array of 2-4 items"),
+    subtotal: z.number().describe("Subtotal amount"),
+    gst: z.number().describe("GST amount (18%)"),
+    total_amount: z.number().describe("Total including GST"),
+    buyer_delivery_address: z.object({
+      street: z.string(),
+      city: z.string(),
+      country: z.string(),
+      pincode: z.string(),
+    }),
+    buyer_delivery_date: z
+      .string()
+      .regex(/^\d{2}\/\d{2}\/\d{4}$/)
+      .describe("Delivery date in DD/MM/YYYY"),
+    buyer_payment_terms: z
+      .string()
+      .describe("Payment terms like 'Net 30 days'"),
+  });
+
+  return await generateAIData(
+    schema,
+    "Indian purchase order with supplier, buyer, and item details",
+    n
+  );
+}
+
+// Fallback generation
+function generatePOsFallback(n: number): PurchaseOrderData[] {
+  const data: PurchaseOrderData[] = [];
   for (let i = 1; i <= n; i++) {
     const supplier = randomChoice(supplierCompanies);
     const buyer = randomChoice(buyerCompanies);
-
     const poNumber = `PO-2025-${String(i).padStart(3, "0")}`;
     const poDate = new Date();
     const issueDate = poDate;
     const deliveryDate = addDays(poDate, Math.floor(Math.random() * 15) + 5);
 
-    // Pick items
-    const itemCount = Math.floor(Math.random() * 3) + 2;
+    const itemCount = Math.floor(Math.random() * 2) + 2;
     const shuffled = [...itemsCatalog].sort(() => 0.5 - Math.random());
     const selected = shuffled.slice(0, itemCount);
 
@@ -124,7 +170,6 @@ function generatePOs(n = 5) {
     const buyerAddr = generateAddress(
       randomChoice(Object.keys(cityPinPrefixes))
     );
-
     const deliveryAddr =
       Math.random() > 0.5 ? buyerAddr : generateAddress(buyerAddr.city);
 
@@ -146,8 +191,10 @@ function generatePOs(n = 5) {
   return data;
 }
 
-// ---- Image Renderer ----
-async function generateSinglePO(data, index) {
+async function generateSinglePO(
+  data: PurchaseOrderData,
+  index: number
+): Promise<string> {
   const baseImage = await loadImage(
     path.join(__dirname, "../templates", "purchase-order-template.png")
   );
@@ -155,7 +202,6 @@ async function generateSinglePO(data, index) {
   const ctx = canvas.getContext("2d");
 
   ctx.drawImage(baseImage, 0, 0);
-
   ctx.font = "bold 12px Arial, sans-serif";
   ctx.fillStyle = "black";
 
@@ -202,28 +248,43 @@ async function generateSinglePO(data, index) {
   // Issue Date
   ctx.fillText(data.issue_date, 482, 795);
 
-  // Save
   const filePath = path.join(outputDir, `purchase_order_${index + 1}.png`);
   fs.writeFileSync(filePath, canvas.toBuffer("image/png"));
   return filePath;
 }
 
-// ---- Express Route ----
-export async function generatePurchaseOrders(payload, res) {
+export async function generatePurchaseOrders(
+  payload: GeneratorPayload,
+  res: Response
+) {
   if (fs.existsSync(outputDir)) {
     fs.readdirSync(outputDir).forEach((f) =>
       fs.unlinkSync(path.join(outputDir, f))
     );
   }
   try {
-    const sample = parseInt(payload.sample) || 10;
-    const records = generatePOs(sample);
+    const sample =
+      typeof payload.sample === "string"
+        ? parseInt(payload.sample)
+        : payload.sample || 50;
 
-    // Generate images
-    const imagePaths = [];
+    let records: PurchaseOrderData[];
+    if (isAIConfigured()) {
+      console.log("🤖 Generating purchase order data using AI...");
+      try {
+        records = await generatePOsAI(sample as number);
+        console.log("✅ AI generation successful");
+      } catch (aiError) {
+        console.warn("⚠️ AI generation failed, using fallback", aiError);
+        records = generatePOsFallback(sample as number);
+      }
+    } else {
+      console.log("ℹ️ AI not configured, using fallback");
+      records = generatePOsFallback(sample as number);
+    }
+
     for (let i = 0; i < records.length; i++) {
-      const img = await generateSinglePO(records[i], i);
-      imagePaths.push(img);
+      await generateSinglePO(records[i], i);
     }
 
     const zipFile = await zipImages("purchase_orders", outputDir);

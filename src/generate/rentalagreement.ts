@@ -1,57 +1,40 @@
-// generate_rental_agreements.js
 import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
 import { fileURLToPath } from "url";
+import { Response } from "express";
+import { z } from "zod";
 import { zipImages } from "../helper/common.js";
+import { GeneratorPayload, RentalAgreementData } from "../types/index.js";
+import { generateAIData, isAIConfigured } from "../lib/ai.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Ensure output dir exists
 const outputDir = path.join(__dirname, "../../output", "samples");
-if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir, { recursive: true });
-}
+if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-// --------------------
-// Sample Data Pools
-// --------------------
-const maleLandlords = [
-  "V. Ramani",
-  "S. Rajesh",
-  "R. Kumar",
-  "K. Shankar",
-  "P. Srinivas",
-];
-const femaleLandlords = ["L. Rekha", "S. Anitha", "G. Divya", "M. Kavitha"];
-const maleTenants = ["V. Narendra Babu", "R. Deepak", "M. Dinesh", "K. Arjun"];
-const femaleTenants = ["K. Priya", "L. Meena", "S. Anitha", "R. Kavitha"];
-const witnessNames = [
-  "P.V. Naveen",
-  "K. Aruna",
-  "M. Dinesh",
-  "J. Kavitha",
-  "T. Surya",
-];
+// Fallback data
+const maleLandlords = ["V. Ramani", "S. Rajesh", "R. Kumar"];
+const femaleLandlords = ["L. Rekha", "S. Anitha", "G. Divya"];
+const maleTenants = ["V. Narendra Babu", "R. Deepak", "M. Dinesh"];
+const femaleTenants = ["K. Priya", "L. Meena", "S. Anitha"];
+const witnessNames = ["P.V. Naveen", "K. Aruna", "M. Dinesh"];
 const addresses = [
   "12 Gandhi St, Anna Nagar, Chennai",
   "22 Mount Road, Chennai",
   "45 MG Road, T Nagar, Chennai",
-  "67 North Street, Madurai",
-  "Flat 22, Mount Road, Chennai",
 ];
 
-function randomChoice(arr) {
+function randomChoice<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
-function generateDate(offset = 0) {
+function generateDate(offset: number = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + offset);
   return d.toLocaleDateString("en-GB");
 }
-function numberToWords(num) {
-  const map = {
+function numberToWords(num: number): string {
+  const map: Record<number, string> = {
     15000: "Fifteen Thousand",
     20000: "Twenty Thousand",
     25000: "Twenty Five Thousand",
@@ -60,13 +43,71 @@ function numberToWords(num) {
   return map[num] || `${num} Rupees`;
 }
 
-// --------------------
-// Generate Single Agreement PDF
-// --------------------
-function generateAgreementPDF(row, index, outputDir) {
+// AI generation
+async function generateRentalDataAI(n: number): Promise<RentalAgreementData[]> {
+  const schema = z.object({
+    date: z
+      .string()
+      .regex(/^\d{2}\/\d{2}\/\d{4}$/)
+      .describe("Agreement date in DD/MM/YYYY"),
+    landlord_title: z.enum(["Mr.", "Mrs."]),
+    landlord_name: z.string().describe("Landlord full name"),
+    landlord_address: z.string().describe("Landlord full address"),
+    tenant_title: z.enum(["Mr.", "Mrs."]),
+    tenant_name: z.string().describe("Tenant full name"),
+    tenant_address: z.string().describe("Tenant full address"),
+    address: z.string().describe("Property address being rented"),
+    rent: z.number().describe("Monthly rent amount"),
+    rent_words: z.string().describe("Rent in words"),
+    deposit: z.number().describe("Security deposit (typically 3x rent)"),
+    witness1_name: z.string().describe("First witness name"),
+    witness2_name: z.string().describe("Second witness name"),
+  });
+
+  return await generateAIData(
+    schema,
+    "Indian rental agreement with landlord, tenant, and property details",
+    n
+  );
+}
+
+// Fallback generation
+function generateRentalDataFallback(n: number): RentalAgreementData[] {
+  const data: RentalAgreementData[] = [];
+  for (let i = 0; i < n; i++) {
+    const landlordIsMale = Math.random() > 0.4;
+    const tenantIsMale = Math.random() > 0.4;
+    const rent = randomChoice([15000, 20000, 25000, 30000]);
+    data.push({
+      date: generateDate(i),
+      landlord_title: landlordIsMale ? "Mr." : "Mrs.",
+      landlord_name: landlordIsMale
+        ? randomChoice(maleLandlords)
+        : randomChoice(femaleLandlords),
+      landlord_address: randomChoice(addresses),
+      tenant_title: tenantIsMale ? "Mr." : "Mrs.",
+      tenant_name: tenantIsMale
+        ? randomChoice(maleTenants)
+        : randomChoice(femaleTenants),
+      tenant_address: randomChoice(addresses),
+      address: randomChoice(addresses),
+      rent,
+      rent_words: numberToWords(rent),
+      deposit: rent * 3,
+      witness1_name: randomChoice(witnessNames),
+      witness2_name: randomChoice(witnessNames),
+    });
+  }
+  return data;
+}
+
+function generateAgreementPDF(
+  row: RentalAgreementData,
+  index: number,
+  outputDir: string
+): void {
   if (!row.tenant_name || !row.landlord_name || !row.address) return;
 
-  // No margin initially → we’ll manually control text margins
   const doc = new PDFDocument({ size: "A4", margin: 0 });
   const handwrittenFontPath = path.join(
     __dirname,
@@ -77,7 +118,6 @@ function generateAgreementPDF(row, index, outputDir) {
   const outputPath = path.join(outputDir, `rental_agreement_${index + 1}.pdf`);
   doc.pipe(fs.createWriteStream(outputPath));
 
-  // Add stamp paper image at top (spanning full width)
   const stampPath = path.join(
     __dirname,
     "../templates",
@@ -85,12 +125,10 @@ function generateAgreementPDF(row, index, outputDir) {
   );
   doc.image(stampPath, 0, 0, { width: doc.page.width });
 
-  // Define text margin box (40px all around)
   const margin = 40;
   const pageWidth = doc.page.width - margin * 2;
-  let yPos = 320; // start text below image (image height ~300px + padding 20px)
+  let yPos = 320;
 
-  // Title
   doc
     .font("Helvetica-Bold")
     .fontSize(18)
@@ -99,10 +137,8 @@ function generateAgreementPDF(row, index, outputDir) {
       width: pageWidth,
       underline: true,
     });
-
   yPos += 40;
 
-  // Agreement body text
   const landlordTitle = row.landlord_title || "";
   const tenantTitle = row.tenant_title || "";
 
@@ -122,11 +158,9 @@ function generateAgreementPDF(row, index, outputDir) {
       `, residing at ${row.landlord_address || "________"} (hereinafter called the OWNER, First Party, which expression includes her heirs administrators representatives and assigns of the one part)`
     );
 
-  yPos += 60; // adjust spacing as needed
-
+  yPos += 60;
   doc.font("Helvetica").text(`AND`, margin, yPos, { align: "center" });
-
-  yPos += 30; // adjust spacing
+  yPos += 30;
 
   doc
     .font("Helvetica")
@@ -150,11 +184,8 @@ function generateAgreementPDF(row, index, outputDir) {
       `${row.landlord_name}                                   ${row.tenant_name}`,
       margin,
       doc.y,
-      {
-        width: pageWidth,
-      }
+      { width: pageWidth }
     );
-
   doc
     .font("Helvetica")
     .fontSize(12)
@@ -162,28 +193,22 @@ function generateAgreementPDF(row, index, outputDir) {
       "Landlord Signature                                                            Tenant Signature",
       margin,
       doc.y,
-      {
-        width: pageWidth,
-      }
+      { width: pageWidth }
     );
 
   doc.addPage({ size: "A4", margin: 40 });
   yPos = doc.y + 20;
-
-  doc.font("Helvetica-Bold").text("WITNESSETH AS FOLLOWS:", margin, yPos, {
-    underline: true,
-    width: pageWidth,
-  });
-
+  doc
+    .font("Helvetica-Bold")
+    .text("WITNESSETH AS FOLLOWS:", margin, yPos, {
+      underline: true,
+      width: pageWidth,
+    });
   yPos = doc.y + 10;
 
-  // Clauses (each adds spacing)
   const clauses = [
-    `1. The Owner hereby rents the premises at ${row.address} for monthly rent of 
-Rs.${row.rent || "________"} (Rupees ${row.rent_words || "________"} only).`,
-    `2. The Tenant shall pay the Owner a sum of Rs.${row.deposit || "________"} 
-towards security deposit. This deposit shall not carry any interest and shall be refunded 
-on vacating the premises after giving due notice and after deduction of arrears/damages, if any.`,
+    `1. The Owner hereby rents the premises at ${row.address} for monthly rent of Rs.${row.rent || "________"} (Rupees ${row.rent_words || "________"} only).`,
+    `2. The Tenant shall pay the Owner a sum of Rs.${row.deposit || "________"} towards security deposit. This deposit shall not carry any interest and shall be refunded on vacating the premises after giving due notice and after deduction of arrears/damages, if any.`,
     `3. The Tenant shall pay the monthly rent on or before the 5th day of the succeeding month.`,
     `4. No alterations of any kind shall be carried out by the Tenant without permission.`,
     `5. The Tenant shall make good any losses or damages caused to the building.`,
@@ -203,16 +228,15 @@ on vacating the premises after giving due notice and after deduction of arrears/
   });
 
   doc.addPage({ size: "A4", margin: 40 });
-  // Closing note
-  doc.moveDown(2).text(
-    `In witness whereof the Owner and Tenant have set their hands today in the 
-presence of witnesses.`,
-    margin,
-    doc.y,
-    { align: "justify", width: pageWidth }
-  );
+  doc
+    .moveDown(2)
+    .text(
+      `In witness whereof the Owner and Tenant have set their hands today in the presence of witnesses.`,
+      margin,
+      doc.y,
+      { align: "justify", width: pageWidth }
+    );
 
-  // Signatures
   doc.moveDown(30);
   doc
     .font("Handwritten")
@@ -221,11 +245,8 @@ presence of witnesses.`,
       `${row.landlord_name}                                   ${row.tenant_name}`,
       margin,
       doc.y,
-      {
-        width: pageWidth,
-      }
+      { width: pageWidth }
     );
-
   doc
     .font("Helvetica")
     .fontSize(12)
@@ -233,13 +254,10 @@ presence of witnesses.`,
       "Landlord Signature                                                            Tenant Signature",
       margin,
       doc.y,
-      {
-        width: pageWidth,
-      }
+      { width: pageWidth }
     );
   doc.moveDown(1);
 
-  // Witnesses
   doc
     .font("Handwritten")
     .fontSize(18)
@@ -247,11 +265,8 @@ presence of witnesses.`,
       `${row.witness1_name || "________"}                                        ${row.witness2_name || "________"} `,
       margin,
       doc.y,
-      {
-        width: pageWidth,
-      }
+      { width: pageWidth }
     );
-
   doc
     .font("Helvetica")
     .fontSize(12)
@@ -259,57 +274,46 @@ presence of witnesses.`,
       "Witness 1                                                                          Witness 2",
       margin,
       doc.y,
-      {
-        width: pageWidth,
-      }
+      { width: pageWidth }
     );
 
   doc.end();
 }
 
-// --------------------
-// Exported Function
-// --------------------
-export async function generateRentalAgreements(payload, res) {
+export async function generateRentalAgreements(
+  payload: GeneratorPayload,
+  res: Response
+): Promise<void> {
   if (fs.existsSync(outputDir)) {
     fs.readdirSync(outputDir).forEach((f) =>
       fs.unlinkSync(path.join(outputDir, f))
     );
   }
   try {
-    const sample = parseInt(payload.sample) || 10;
+    const sample =
+      typeof payload.sample === "string"
+        ? parseInt(payload.sample)
+        : payload.sample || 50;
 
-    // Generate data and PDFs
-    for (let i = 0; i < sample; i++) {
-      const date = generateDate(i);
-      const landlordIsMale = Math.random() > 0.4;
-      const tenantIsMale = Math.random() > 0.4;
-      const rent = randomChoice([15000, 20000, 25000, 30000]);
-
-      const data = {
-        date,
-        landlord_title: landlordIsMale ? "Mr." : "Mrs.",
-        landlord_name: landlordIsMale
-          ? randomChoice(maleLandlords)
-          : randomChoice(femaleLandlords),
-        landlord_address: randomChoice(addresses),
-        tenant_title: tenantIsMale ? "Mr." : "Mrs.",
-        tenant_name: tenantIsMale
-          ? randomChoice(maleTenants)
-          : randomChoice(femaleTenants),
-        tenant_address: randomChoice(addresses),
-        address: randomChoice(addresses),
-        rent,
-        rent_words: numberToWords(rent),
-        deposit: rent * 3,
-        witness1_name: randomChoice(witnessNames),
-        witness2_name: randomChoice(witnessNames),
-      };
-
-      generateAgreementPDF(data, i, outputDir);
+    let data: RentalAgreementData[];
+    if (isAIConfigured()) {
+      console.log("🤖 Generating rental agreement data using AI...");
+      try {
+        data = await generateRentalDataAI(sample as number);
+        console.log("✅ AI generation successful");
+      } catch (aiError) {
+        console.warn("⚠️ AI generation failed, using fallback", aiError);
+        data = generateRentalDataFallback(sample as number);
+      }
+    } else {
+      console.log("ℹ️ AI not configured, using fallback");
+      data = generateRentalDataFallback(sample as number);
     }
 
-    // Zip PDFs
+    for (let i = 0; i < sample; i++) {
+      generateAgreementPDF(data[i], i, outputDir);
+    }
+
     const zipFile = await zipImages("rental_agreements", outputDir);
     console.log(`🎉 ${sample} rental agreements generated -> ${zipFile}`);
 

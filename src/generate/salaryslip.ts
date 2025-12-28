@@ -1,24 +1,21 @@
-// generate_salary_slips.js
 import fs from "fs";
 import path from "path";
-import archiver from "archiver";
 import { createCanvas, loadImage } from "canvas";
 import { fileURLToPath } from "url";
+import { Response } from "express";
+import { z } from "zod";
 import { zipImages } from "../helper/common.js";
+import { GeneratorPayload, SalarySlipData } from "../types/index.js";
+import { generateAIData, isAIConfigured } from "../lib/ai.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Ensure output dir exists
 const outputDir = path.join(__dirname, "../../output", "samples");
-if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir, { recursive: true });
-}
+if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-// ------------------
-// Sample Data Pools
-// ------------------
-const companies = [
+// Fallback data
+type Company = { name: string; city: string; addr: string; pfCode: string };
+const companies: Company[] = [
   {
     name: "CAPCO WATER SOLUTIONS PVT LTD - MUMBAI",
     city: "Mumbai",
@@ -31,91 +28,18 @@ const companies = [
     addr: "100, MG Road, Bangalore - 560001",
     pfCode: "KA",
   },
-  {
-    name: "SUNRISE TEXTILES PVT LTD - CHENNAI",
-    city: "Chennai",
-    addr: "50, Mount Road, Chennai - 600002",
-    pfCode: "TN",
-  },
-  {
-    name: "GREEN ENERGY INDIA LTD - DELHI",
-    city: "Delhi",
-    addr: "200, Connaught Place, New Delhi - 110001",
-    pfCode: "DL",
-  },
-  {
-    name: "EVEREST FOODS LTD - PUNE",
-    city: "Pune",
-    addr: "45, FC Road, Pune - 411004",
-    pfCode: "MH",
-  },
-  {
-    name: "SOUTHERN MOTORS LTD - COIMBATORE",
-    city: "Coimbatore",
-    addr: "75 Avinashi Road, Coimbatore - 641018",
-    pfCode: "TN",
-  },
-  {
-    name: "RADIENT SOFTWARE SOLUTIONS - HYDERABAD",
-    city: "Hyderabad",
-    addr: "Plot 55, Hitech City, Hyderabad - 500081",
-    pfCode: "TS",
-  },
-  {
-    name: "OCEAN SHIPPING PVT LTD - KOLKATA",
-    city: "Kolkata",
-    addr: "Dockyard Road, Howrah, Kolkata - 700001",
-    pfCode: "WB",
-  },
 ];
+const firstNames = ["Arun", "Suresh", "Neha", "Ravi"];
+const lastNames = ["Kumar", "Sharma", "Verma", "Iyer"];
+const departments = ["HR", "Finance", "Sales", "IT"];
 
-const firstNames = [
-  "Arun",
-  "Suresh",
-  "Neha",
-  "Ravi",
-  "Kiran",
-  "Pooja",
-  "Sneha",
-  "Rahul",
-  "Deepak",
-  "Meera",
-];
-const lastNames = [
-  "Kumar",
-  "Sharma",
-  "Verma",
-  "Iyer",
-  "Naidu",
-  "Reddy",
-  "Rao",
-  "Menon",
-  "Nair",
-  "Das",
-];
-const departments = [
-  "HR",
-  "Finance",
-  "Sales",
-  "Marketing",
-  "Operations",
-  "IT",
-  "Engineering",
-  "Customer Support",
-  "Legal",
-  "Procurement",
-];
-
-// ------------------
-// Helpers
-// ------------------
-function randomChoice(arr) {
+function randomChoice<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
-function f(num) {
+function f(num: number): string {
   return num.toFixed(2);
 }
-function numberToWords(num) {
+function numberToWords(num: number): string {
   const ones = [
     "",
     "One",
@@ -151,7 +75,7 @@ function numberToWords(num) {
     "Ninety",
   ];
   if (num === 0) return "Zero";
-  function toWords(n) {
+  function toWords(n: number): string {
     if (n < 20) return ones[n];
     if (n < 100)
       return tens[Math.floor(n / 10)] + (n % 10 ? " " + ones[n % 10] : "");
@@ -183,7 +107,14 @@ function randomMonthYear() {
   const month = months[Math.floor(Math.random() * 12)];
   return { month, year };
 }
-function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+function wrapText(
+  ctx: any,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number
+) {
   const words = text.split(" ");
   let line = "";
   let lineArray = [];
@@ -202,11 +133,74 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
   }
 }
 
-// ------------------
-// Generate Salary Data
-// ------------------
-function generateSalaryData(n = 10) {
-  const data = [];
+// AI generation
+async function generateSalaryDataAI(n: number): Promise<SalarySlipData[]> {
+  const schema = z.object({
+    companyName: z.string().describe("Company name with city"),
+    companyAddr: z.string().describe("Full company address"),
+    empId: z.string().describe("Employee ID like KA1001"),
+    empName: z.string().describe("Employee full name"),
+    pfNo: z.string().describe("PF number like KA/12345/10001"),
+    uan: z.string().describe("12-digit UAN"),
+    esiNo: z.string().describe("ESI number like KA/ESI/1000000001"),
+    present: z.number().describe("Days present (20-28)"),
+    absent: z.number().describe("Days absent (2-10)"),
+    doj: z
+      .string()
+      .regex(/^\d{2}\/\d{2}\/\d{4}$/)
+      .describe("Date of joining in DD/MM/YYYY"),
+    department: z.string().describe("Department name"),
+    branch: z.string().describe("Branch like 'Mumbai Branch'"),
+    month: z.string().describe("Month like 'Jan' or 'Feb'"),
+    year: z.number().describe("Year like 2024"),
+    earnings: z.object({
+      basicAmt: z.number(),
+      daAmt: z.number(),
+      hraAmt: z.number(),
+      specialAmt: z.number(),
+      medicalAmt: z.number(),
+      transportAmt: z.number(),
+      eduAmt: z.number(),
+    }),
+    earningsRate: z.object({
+      basic: z.number(),
+      da: z.number(),
+      hra: z.number(),
+      special: z.number(),
+      medical: z.number(),
+      transport: z.number(),
+      edu: z.number(),
+    }),
+    deductions: z.object({
+      pf: z.number(),
+      esi: z.number(),
+      pt: z.number(),
+      tds: z.number(),
+      adv: z.number(),
+    }),
+    totalRate: z.number(),
+    totalAmt: z.number(),
+    totalDeductions: z.number(),
+    net: z.number(),
+    netWords: z.string().describe("Net salary in words"),
+    company: z.object({
+      name: z.string(),
+      city: z.string(),
+      addr: z.string(),
+      pfCode: z.string(),
+    }),
+  });
+
+  return await generateAIData(
+    schema,
+    "Indian salary slip with detailed earnings and deductions",
+    n
+  );
+}
+
+// Fallback generation
+function generateSalaryDataFallback(n: number): SalarySlipData[] {
+  const data: SalarySlipData[] = [];
   for (let i = 1; i <= n; i++) {
     const company = companies[i % companies.length];
     const { month, year } = randomMonthYear();
@@ -241,8 +235,8 @@ function generateSalaryData(n = 10) {
     const pt = gross > 15000 ? 200 : 0;
     const tds = gross > 50000 ? gross * 0.1 : 0;
     const adv = i % 25 === 0 ? 1000 : 0;
-    const deductions = pf + esi + pt + tds + adv;
-    const net = totalAmt - deductions;
+    const deductionsArr = pf + esi + pt + tds + adv;
+    const net = totalAmt - deductionsArr;
     const netWords = `Rupees ${numberToWords(Math.floor(net))} Only`;
     data.push({
       company,
@@ -269,7 +263,7 @@ function generateSalaryData(n = 10) {
       deductions: { pf, esi, pt, tds, adv },
       totalRate,
       totalAmt,
-      totalDeductions: deductions,
+      totalDeductions: deductionsArr,
       net,
       netWords,
       month,
@@ -281,10 +275,11 @@ function generateSalaryData(n = 10) {
   return data;
 }
 
-// ------------------
-// Generate Single Payslip Image
-// ------------------
-async function generateSinglePayslip(data, index, outputDir) {
+async function generateSinglePayslip(
+  data: SalarySlipData,
+  index: number,
+  outputDir: string
+): Promise<void> {
   const baseImage = await loadImage(
     path.join(__dirname, "../templates", "salary-slip-sample-template.png")
   );
@@ -293,7 +288,6 @@ async function generateSinglePayslip(data, index, outputDir) {
   ctx.drawImage(baseImage, 0, 0);
   ctx.fillStyle = "black";
 
-  // Header
   ctx.font = "Bold 50px Arial, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(data.companyName, 1270, 500);
@@ -304,21 +298,19 @@ async function generateSinglePayslip(data, index, outputDir) {
     635
   );
 
-  // Employee details
   ctx.textAlign = "left";
   ctx.font = "40px Arial, sans-serif";
   ctx.fillText(data.empId, 522, 755);
   ctx.fillText(data.empName, 1582, 755);
   ctx.fillText(data.pfNo, 522, 815);
   ctx.fillText(data.esiNo, 1580, 815);
-  ctx.fillText(data.present, 522, 875);
+  ctx.fillText(data.present.toString(), 522, 875);
   ctx.fillText(data.doj, 1585, 870);
   ctx.fillText(data.department, 522, 930);
   ctx.fillText(data.branch, 1585, 930);
   ctx.fillText(data.uan, 522, 985);
-  ctx.fillText(data.absent, 1585, 985);
+  ctx.fillText(data.absent.toString(), 1585, 985);
 
-  // Earnings
   ctx.textAlign = "right";
   let earningsStartY = 1140,
     rowGap = 54,
@@ -341,7 +333,6 @@ async function generateSinglePayslip(data, index, outputDir) {
   ctx.fillText(f(r.transport), rateX, earningsStartY + rowGap * 6);
   ctx.fillText(f(e.transportAmt), amountX, earningsStartY + rowGap * 6);
 
-  // Deductions
   const d = data.deductions,
     dStartX = 2300,
     dStartY = 1140;
@@ -351,7 +342,6 @@ async function generateSinglePayslip(data, index, outputDir) {
   ctx.fillText(f(d.tds), dStartX, dStartY + rowGap * 3);
   ctx.fillText(f(d.adv), dStartX, dStartY + rowGap * 4);
 
-  // Totals
   ctx.font = "Bold 40px Arial, sans-serif";
   ctx.fillText(f(data.totalRate), 900, 1800);
   ctx.fillText(f(data.totalAmt), 1350, 1800);
@@ -362,7 +352,6 @@ async function generateSinglePayslip(data, index, outputDir) {
   ctx.font = "Bold 40px Arial, sans-serif";
   wrapText(ctx, data.netWords, 410, 1915, 1200, 50);
 
-  // Signature
   ctx.textAlign = "center";
   ctx.font = "40px Arial, sans-serif";
   ctx.fillText("HR Manager", 2030, 1950);
@@ -371,20 +360,36 @@ async function generateSinglePayslip(data, index, outputDir) {
   fs.writeFileSync(outputPath, canvas.toBuffer("image/png"));
 }
 
-// ------------------
-// Express Route: Generate Payslips & Zip
-// ------------------
-export async function generateSalarySlips(payload, res) {
+export async function generateSalarySlips(
+  payload: GeneratorPayload,
+  res: Response
+): Promise<void> {
   if (fs.existsSync(outputDir)) {
     fs.readdirSync(outputDir).forEach((f) =>
       fs.unlinkSync(path.join(outputDir, f))
     );
   }
   try {
-    const sample = parseInt(payload.sample) || 10;
-    const salaryData = generateSalaryData(sample);
+    const sample =
+      typeof payload.sample === "string"
+        ? parseInt(payload.sample)
+        : payload.sample || 50;
 
-    // Generate images
+    let salaryData: SalarySlipData[];
+    if (isAIConfigured()) {
+      console.log("🤖 Generating salary slip data using AI...");
+      try {
+        salaryData = await generateSalaryDataAI(sample as number);
+        console.log("✅ AI generation successful");
+      } catch (aiError) {
+        console.warn("⚠️ AI generation failed, using fallback", aiError);
+        salaryData = generateSalaryDataFallback(sample as number);
+      }
+    } else {
+      console.log("ℹ️ AI not configured, using fallback");
+      salaryData = generateSalaryDataFallback(sample as number);
+    }
+
     for (let i = 0; i < sample; i++) {
       await generateSinglePayslip(salaryData[i], i, outputDir);
     }

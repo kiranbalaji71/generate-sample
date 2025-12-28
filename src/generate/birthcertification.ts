@@ -1,9 +1,13 @@
-// src/generate/birth.js
+// src/generate/birthcertification.ts
 import fs from "fs";
 import path from "path";
-import { createCanvas, loadImage } from "canvas";
+import { createCanvas, loadImage, CanvasRenderingContext2D } from "canvas";
 import { fileURLToPath } from "url";
+import { Response } from "express";
+import { z } from "zod";
 import { zipImages } from "../helper/common.js";
+import { GeneratorPayload, BirthCertificateData } from "../types/index.js";
+import { generateAIData, isAIConfigured } from "../lib/ai.js";
 
 // __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -22,33 +26,18 @@ const signaturePath = path.join(__dirname, "../templates", "signature.png");
 if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
 // ---------------- UTILS ----------------
-function randomUID() {
+function randomUID(): number {
   return Math.floor(100000000000 + Math.random() * 900000000000);
 }
-function randomDateBetween(start, end) {
-  const date = new Date(
-    start.getTime() + Math.random() * (end.getTime() - start.getTime())
-  );
-  return date
-    .toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    })
-    .replace(/ /g, "-");
-}
-function generateCertificateNo(cityCode, issueDate, seq) {
-  const [day, monStr, year] = issueDate.split("-");
-  const month = new Date(`${monStr} 1, ${year}`).getMonth() + 1;
-  const monthStr = String(month).padStart(2, "0");
-  const seqStr = String(seq).padStart(7, "0");
-  return `${cityCode}/${monthStr}/${year}/${seqStr}`;
-}
-function generateRegistrationNo(bodyCode, year, ward, serial) {
-  const serialStr = String(serial).padStart(5, "0");
-  return `${bodyCode}/${year}/${ward}/${serialStr}`;
-}
-function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+
+function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number
+): void {
   const words = text.split(" ");
   let line = "";
   const lines = [];
@@ -68,8 +57,67 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
   lines.forEach((l, i) => ctx.fillText(l, x, y + i * lineHeight));
 }
 
-// ---------------- SAMPLE DATA ----------------
-const maleNames = [
+// ---------------- AI DATA GENERATION ----------------
+async function generateBirthDataAI(n: number): Promise<BirthCertificateData[]> {
+  const birthCertSchema = z.object({
+    "Certificate No": z
+      .string()
+      .describe("Certificate number in format like CHN/05/2019/0001234"),
+    "Name of Child": z.string().describe("Realistic Indian child name"),
+    Sex: z.enum(["Male", "Female"]),
+    "Date of Birth": z
+      .string()
+      .regex(/^\d{2}-[A-Za-z]{3}-\d{4}$/)
+      .describe("Date in format DD-Mon-YYYY like 15-Jan-2020"),
+    "Place of Birth": z
+      .string()
+      .describe("Realistic Indian hospital name and city"),
+    "Name of Father": z
+      .string()
+      .describe("Realistic Indian father's full name"),
+    "UID of Father": z.number().describe("12-digit UID number"),
+    "Name of Mother": z
+      .string()
+      .describe("Realistic Indian mother's full name"),
+    "UID of Mother": z.number().describe("12-digit UID number"),
+    "Permanent Address of Parents": z
+      .string()
+      .describe(
+        "Full Indian address with street, area, city, and valid pincode"
+      ),
+    "Address at Time of Birth": z
+      .string()
+      .describe(
+        "Full Indian address with street, area, city, and valid pincode"
+      ),
+    "Registration Number": z
+      .string()
+      .describe("Registration number in format like 101/2020/12/12345"),
+    "Date of Registration": z
+      .string()
+      .regex(/^\d{2}-[A-Za-z]{3}-\d{4}$/)
+      .describe("Registration date in DD-Mon-YYYY format"),
+    Remarks: z.string().describe("Usually empty or 'None'"),
+    "Date of Issue": z
+      .string()
+      .regex(/^\d{2}-[A-Za-z]{3}-\d{4}$/)
+      .describe("Issue date in DD-Mon-YYYY format"),
+    "Issuing Authority": z
+      .string()
+      .describe(
+        "Name of Indian municipal corporation like 'Greater Chennai Corporation'"
+      ),
+  });
+
+  return await generateAIData(
+    birthCertSchema,
+    "Indian birth certificate data with authentic Indian names, addresses, and government document numbers",
+    n
+  );
+}
+
+// ---------------- FALLBACK DATA GENERATION ----------------
+const maleNames: string[] = [
   "Arun Kumar",
   "Suresh Babu",
   "Prakash Raj",
@@ -77,14 +125,21 @@ const maleNames = [
   "Karthik",
   "Ramesh",
 ];
-const femaleNames = ["Meena", "Divya", "Lakshmi", "Ananya", "Harini", "Priya"];
-const fatherNames = [
+const femaleNames: string[] = [
+  "Meena",
+  "Divya",
+  "Lakshmi",
+  "Ananya",
+  "Harini",
+  "Priya",
+];
+const fatherNames: string[] = [
   "Ramesh Kumar",
   "Sundar Raj",
   "Mohan Babu",
   "Krishnan Iyer",
 ];
-const motherNames = ["Saranya", "Kavitha", "Geetha", "Lakshmi"];
+const motherNames: string[] = ["Saranya", "Kavitha", "Geetha", "Lakshmi"];
 
 const hospitals = [
   {
@@ -104,14 +159,42 @@ const hospitals = [
     pincodes: [625020, 625007],
   },
 ];
-const cityConfigs = {
+
+type CityConfig = {
+  certCode: string;
+  bodyCode: number;
+  wards: number[];
+};
+
+const cityConfigs: Record<string, CityConfig> = {
   Chennai: { certCode: "CHN", bodyCode: 101, wards: [11, 12, 13] },
   Madurai: { certCode: "MDU", bodyCode: 102, wards: [21, 22, 23] },
 };
 
-// ---------------- GENERATOR ----------------
-function generateBirthData(n = 100) {
-  const rows = [];
+function generateCertificateNo(
+  cityCode: string,
+  issueDate: string,
+  seq: number
+): string {
+  const [day, monStr, year] = issueDate.split("-");
+  const month = new Date(`${monStr} 1, ${year}`).getMonth() + 1;
+  const monthStr = String(month).padStart(2, "0");
+  const seqStr = String(seq).padStart(7, "0");
+  return `${cityCode}/${monthStr}/${year}/${seqStr}`;
+}
+
+function generateRegistrationNo(
+  bodyCode: number,
+  year: string,
+  ward: number,
+  serial: number
+): string {
+  const serialStr = String(serial).padStart(5, "0");
+  return `${bodyCode}/${year}/${ward}/${serialStr}`;
+}
+
+function generateBirthDataFallback(n: number): BirthCertificateData[] {
+  const rows: BirthCertificateData[] = [];
   for (let i = 0; i < n; i++) {
     const father = fatherNames[Math.floor(Math.random() * fatherNames.length)];
     let mother = motherNames[Math.floor(Math.random() * motherNames.length)];
@@ -133,7 +216,6 @@ function generateBirthData(n = 100) {
     const authority = placeObj.authority;
     const city = placeObj.city;
 
-    // Dates
     const dobDate = new Date(
       2018 + Math.floor(Math.random() * 6),
       Math.floor(Math.random() * 12),
@@ -146,27 +228,18 @@ function generateBirthData(n = 100) {
       regDate.getTime() + Math.floor(Math.random() * 60) * 86400000
     );
 
-    const dob = dobDate
-      .toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-      .replace(/ /g, "-");
-    const regDateStr = regDate
-      .toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-      .replace(/ /g, "-");
-    const issueDateStr = issueDate
-      .toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-      .replace(/ /g, "-");
+    const format = (d: Date) =>
+      d
+        .toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+        .replace(/ /g, "-");
+
+    const dob = format(dobDate);
+    const regDateStr = format(regDate);
+    const issueDateStr = format(issueDate);
 
     const config = cityConfigs[city];
     const year = dob.split("-")[2];
@@ -176,7 +249,7 @@ function generateBirthData(n = 100) {
     const regNo = generateRegistrationNo(config.bodyCode, year, ward, serial);
     const certNo = generateCertificateNo(config.certCode, issueDateStr, i + 1);
 
-    const address = (j) =>
+    const getAddress = (j: number) =>
       `No.${100 + j}, ${placeObj.streets[Math.floor(Math.random() * placeObj.streets.length)]}, ${placeObj.areas[Math.floor(Math.random() * placeObj.areas.length)]}, ${placeObj.city}-${placeObj.pincodes[Math.floor(Math.random() * placeObj.pincodes.length)]}`;
 
     rows.push({
@@ -189,8 +262,8 @@ function generateBirthData(n = 100) {
       "UID of Father": fatherUID,
       "Name of Mother": mother,
       "UID of Mother": motherUID,
-      "Permanent Address of Parents": address(i),
-      "Address at Time of Birth": address(i + 1),
+      "Permanent Address of Parents": getAddress(i),
+      "Address at Time of Birth": getAddress(i + 1),
       "Registration Number": regNo,
       "Date of Registration": regDateStr,
       Remarks: "",
@@ -202,9 +275,14 @@ function generateBirthData(n = 100) {
 }
 
 // ---------------- DRAW IMAGE ----------------
-async function drawCertificate(data, index, baseImage, signatureImage) {
+async function drawCertificate(
+  data: BirthCertificateData,
+  index: number,
+  baseImage: any,
+  signatureImage: any
+): Promise<void> {
   const canvas = createCanvas(baseImage.width, baseImage.height);
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
   ctx.drawImage(baseImage, 0, 0);
 
   ctx.font = "42px Arial, sans-serif";
@@ -216,9 +294,9 @@ async function drawCertificate(data, index, baseImage, signatureImage) {
   wrapText(ctx, data["Place of Birth"], 1270, 1595, 1000, 50);
 
   ctx.fillText(data["Name of Father"], 1270, 1850);
-  ctx.fillText(data["UID of Father"], 1270, 1955);
+  ctx.fillText(data["UID of Father"].toString(), 1270, 1955);
   ctx.fillText(data["Name of Mother"], 1270, 2048);
-  ctx.fillText(data["UID of Mother"], 1270, 2145);
+  ctx.fillText(data["UID of Mother"].toString(), 1270, 2145);
 
   wrapText(ctx, data["Permanent Address of Parents"], 1270, 2245, 1000, 50);
   wrapText(ctx, data["Address at Time of Birth"], 1270, 2435, 1000, 50);
@@ -243,15 +321,38 @@ async function drawCertificate(data, index, baseImage, signatureImage) {
 }
 
 // ---------------- MAIN EXPORT ----------------
-export async function generateBirthCertificates(payload, res) {
+export async function generateBirthCertificates(
+  payload: GeneratorPayload,
+  res: Response
+): Promise<void> {
   if (fs.existsSync(outputDir)) {
     fs.readdirSync(outputDir).forEach((f) =>
       fs.unlinkSync(path.join(outputDir, f))
     );
   }
   try {
-    const sample = parseInt(payload.sample) || 50;
-    const data = generateBirthData(sample);
+    const sample =
+      typeof payload.sample === "string"
+        ? parseInt(payload.sample)
+        : payload.sample || 50;
+
+    let data: BirthCertificateData[];
+
+    // Try AI generation first
+    if (isAIConfigured()) {
+      console.log("🤖 Generating birth certificate data using AI...");
+      try {
+        data = await generateBirthDataAI(sample as number);
+        console.log("✅ AI generation successful");
+      } catch (aiError) {
+        console.warn("⚠️ AI generation failed, using fallback data", aiError);
+        data = generateBirthDataFallback(sample as number);
+      }
+    } else {
+      console.log("ℹ️ AI not configured, using fallback data");
+      data = generateBirthDataFallback(sample as number);
+    }
+
     const baseImage = await loadImage(templatePath);
     const signatureImage = await loadImage(signaturePath);
 

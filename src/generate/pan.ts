@@ -1,8 +1,12 @@
 import fs from "fs";
 import path from "path";
-import { createCanvas, loadImage } from "canvas";
+import { createCanvas, loadImage, Image } from "canvas";
 import { fileURLToPath } from "url";
+import { Response } from "express";
+import { z } from "zod";
 import { zipImages } from "../helper/common.js";
+import { GeneratorPayload, PANData } from "../types/index.js";
+import { generateAIData, isAIConfigured } from "../lib/ai.js";
 
 // __dirname workaround for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -19,15 +23,10 @@ const templatePath = path.join(
 // Ensure directories exist
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
-} else {
-  // Clear old files before generating
-  fs.readdirSync(outputDir).forEach((file) => {
-    fs.unlinkSync(path.join(outputDir, file));
-  });
 }
 
-// Sample name data
-const trustNames = [
+// Fallback data (used when AI is not configured)
+const trustNames: string[] = [
   "Shree Ram Trust",
   "Saraswathi Educational Trust",
   "Lakshmi Charitable Trust",
@@ -40,7 +39,7 @@ const trustNames = [
   "Sundaram Trust",
 ];
 
-const companyPrefixes = [
+const companyPrefixes: string[] = [
   "Greenfield",
   "BrightWave",
   "BlueOcean",
@@ -51,19 +50,9 @@ const companyPrefixes = [
   "EcoSmart",
   "Vertex",
   "Summit",
-  "SilverLine",
-  "Visionary",
-  "Infinity",
-  "Crystal",
-  "RapidGrow",
-  "UrbanEdge",
-  "Solaris",
-  "Nimbus",
-  "Everest",
-  "Apex",
 ];
 
-const companySuffixes = [
+const companySuffixes: string[] = [
   "Industries",
   "Solutions Ltd",
   "Technologies Pvt Ltd",
@@ -72,19 +61,10 @@ const companySuffixes = [
   "Global Ltd",
   "Systems",
   "Group",
-  "Holdings",
-  "International",
-  "Exports",
-  "Imports",
-  "Logistics",
-  "Agro Industries",
-  "Healthcare Pvt Ltd",
-  "Energy Ltd",
-  "Constructions",
 ];
 
 // Utility: Random date between 1980 and 2020
-function generateRandomDate() {
+function generateRandomDate(): string {
   const start = new Date(1980, 0, 1);
   const end = new Date(2020, 11, 31);
   const randomTime =
@@ -94,31 +74,37 @@ function generateRandomDate() {
 }
 
 // Utility: Generate PAN with 4th char fixed
-function generatePAN(type = "pan_company") {
+function generatePAN(type: string = "pan_company"): string {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const digits = "0123456789";
   const fourthChar = type === "pan_trust" ? "T" : "C";
 
-  return (
+  const randomLetters = (len: number) =>
     Array.from(
-      { length: 3 },
+      { length: len },
       () => letters[Math.floor(Math.random() * letters.length)]
-    ).join("") +
+    ).join("");
+
+  const randomDigits = (len: number) =>
+    Array.from(
+      { length: len },
+      () => digits[Math.floor(Math.random() * digits.length)]
+    ).join("");
+
+  return (
+    randomLetters(3) +
     fourthChar +
     letters[Math.floor(Math.random() * letters.length)] +
-    Array.from(
-      { length: 4 },
-      () => digits[Math.floor(Math.random() * digits.length)]
-    ).join("") +
+    randomDigits(4) +
     letters[Math.floor(Math.random() * letters.length)]
   );
 }
 
-function generateTrustName() {
+function generateTrustName(): string {
   return trustNames[Math.floor(Math.random() * trustNames.length)];
 }
 
-function generateCompanyName() {
+function generateCompanyName(): string {
   const prefix =
     companyPrefixes[Math.floor(Math.random() * companyPrefixes.length)];
   const suffix =
@@ -126,8 +112,9 @@ function generateCompanyName() {
   return `${prefix} ${suffix}`;
 }
 
-function generatePanData(n, type) {
-  const data = [];
+// Fallback: Traditional hardcoded data generation
+function generatePanDataFallback(n: number, type: string): PANData[] {
+  const data: PANData[] = [];
   for (let i = 0; i < n; i++) {
     const name =
       type === "pan_trust" ? generateTrustName() : generateCompanyName();
@@ -140,7 +127,44 @@ function generatePanData(n, type) {
   return data;
 }
 
-async function generateImage(row, index, baseImage) {
+// AI-powered data generation
+async function generatePanDataAI(n: number, type: string): Promise<PANData[]> {
+  const panSchema = z.object({
+    name: z
+      .string()
+      .describe(
+        type === "pan_trust"
+          ? "Realistic Indian trust name (e.g., Shree Ram Trust, Vivekananda Welfare Trust)"
+          : "Realistic Indian company name with proper suffix (e.g., TechCorp Solutions Ltd, Global Industries)"
+      ),
+    date: z
+      .string()
+      .regex(/^\d{2}\/\d{2}\/\d{4}$/)
+      .describe("Date in DD/MM/YYYY format between 1980-2020"),
+    pan_no: z
+      .string()
+      .regex(/^[A-Z]{3}[TC][A-Z]\d{4}[A-Z]$/)
+      .describe(
+        type === "pan_trust"
+          ? "PAN number with 4th character as 'T' for trusts (format: ABCTA1234Z)"
+          : "PAN number with 4th character as 'C' for companies (format: ABCCA1234Z)"
+      ),
+  });
+
+  return await generateAIData(
+    panSchema,
+    type === "pan_trust"
+      ? "Indian trust PAN card data with realistic trust names and valid PAN numbers"
+      : "Indian company PAN card data with realistic company names and valid PAN numbers",
+    n
+  );
+}
+
+async function generateImage(
+  row: PANData,
+  index: number,
+  baseImage: any
+): Promise<void> {
   const canvas = createCanvas(800, 600);
   const ctx = canvas.getContext("2d");
 
@@ -161,7 +185,10 @@ async function generateImage(row, index, baseImage) {
 }
 
 // Main generator function
-export async function generatePANcards(payload, res) {
+export async function generatePANcards(
+  payload: GeneratorPayload,
+  res: Response
+): Promise<void> {
   if (fs.existsSync(outputDir)) {
     fs.readdirSync(outputDir).forEach((file) => {
       fs.unlinkSync(path.join(outputDir, file));
@@ -169,9 +196,28 @@ export async function generatePANcards(payload, res) {
   }
 
   try {
-    const sample = parseInt(payload.sample) || 50;
+    const sample =
+      typeof payload.sample === "string"
+        ? parseInt(payload.sample)
+        : payload.sample || 50;
     const type = payload.type || "pan_company";
-    const panData = generatePanData(sample, type);
+
+    let panData: PANData[];
+
+    // Try AI generation first, fallback to hardcoded if not configured
+    if (isAIConfigured()) {
+      console.log("🤖 Generating PAN data using AI...");
+      try {
+        panData = await generatePanDataAI(sample as number, type);
+        console.log("✅ AI generation successful");
+      } catch (aiError) {
+        console.warn("⚠️ AI generation failed, using fallback data", aiError);
+        panData = generatePanDataFallback(sample as number, type);
+      }
+    } else {
+      console.log("ℹ️ AI not configured, using fallback data");
+      panData = generatePanDataFallback(sample as number, type);
+    }
 
     // Load base image
     const baseImage = await loadImage(templatePath);

@@ -1,135 +1,126 @@
-# Document Generator
+# AI Document Generator
 
-A web-based document generator built with **Node.js** and **Express**, featuring multiple document types like PAN cards, Ration Cards, Gas Bills, Birth Certificates, Employment Letters, and more. Users can select the type of document, specify the number of samples, and download them as a ZIP file.
+![App Screenshot](docs/Screen.jpeg)
+
+A powerful, web-based AI-powered document generator built with **TypeScript** and **Express**. Dynamically generate realistic sample data for various document types using OpenAI's GPT-4, with a robust fallback mechanism and a sleek, modern UI.
 
 Check the source code on GitHub: [GitHub Repo](https://github.com/kiranbalaji71/generate-sample.git)
 
 ---
 
-## Features
+## 🚀 Features
 
-- Generate multiple document types:
-  - PAN (Trust / Company)
-  - Ration Card
-  - Gas Bill
-  - Electricity Bill
-  - Birth Certificate
-  - Employment Offer Letter
-  - Goods Receipt Note (GRN)
-  - Purchase Order
-  - Vehicle Registration Certificate
-  - Salary Slip
-  - Rental Agreement
-- Specify the number of samples to generate.
-- Progress bar indicates generation status.
-- Download generated documents as a ZIP file.
+- **🤖 AI-Powered Data Generation**: Leverages OpenAI GPT-4 to generate authentic and diverse sample data.
+- **🛡️ Robust Fallback Mode**: Automatically switches to high-quality hardcoded data if AI is not configured or fails.
+- **🔥 Multiple Document Types**:
+  - **Identity & Legal**: PAN (Trust / Company), Birth Certificate, Rental Agreement.
+  - **Billing**: Gas Bill, Electricity Bill.
+  - **Corporate**: Employment Offer Letter, Purchase Order, Goods Receipt Note (GRN), Salary Slip.
+  - **Automotive**: Vehicle Registration Certificate (RC).
+- **📊 Real-time Progress**: Visual progress bar tracking the generation status.
+- **📦 Batch Generation**: Specify any number of samples and download them instantly as a ZIP file.
+- **💎 Premium UI**: Modern dark theme designed with Tailwind CSS, featuring glassmorphism and Lucide icons.
 
 ---
 
-## Installation
+## 🛠️ Installation
 
 1. **Clone the repository**:
 
-```bash
-git clone https://github.com/kiranbalaji71/generate-sample.git
-cd generate-sample
-```
+   ```bash
+   git clone https://github.com/kiranbalaji71/generate-sample.git
+   cd generate-sample
+   ```
 
 2. **Install dependencies**:
 
-```bash
-yarn
-```
+   ```bash
+   npm install
+   # or
+   yarn install
+   ```
 
-3. **Run the server**:
+3. **Configure AI (Optional but Highly Recommended)**:
+   Create a `.env` file in the root directory and add your OpenAI API key:
 
-```bash
-yarn run dev
-```
+   ```env
+   OPENAI_API_KEY=sk-your-actual-openai-api-key-here
+   AI_MODEL=gpt-4o-mini
+   ```
 
-The server will start at [http://localhost:8000](http://localhost:8000).
+   > [!TIP]
+   > Configure your API key to experience the full power of realistic, AI-generated data.
+
+4. **Run the server**:
+   ```bash
+   npm run dev
+   # or
+   yarn run dev
+   ```
+   The application will be available at [http://localhost:8000](http://localhost:8000).
 
 ---
 
-## Project Structure
+## 📂 Project Structure
 
 ```
 .
-├── public/                      # Frontend files (HTML, CSS, JS)
-│   └── index.html
+├── public/                      # Frontend assets (HTML, Tailwind CSS, JS)
 ├── src/
-│   ├── index.js                 # Main server file
-│   ├── fonts/
-│   ├── generate/                # Document generation scripts
-│   │   ├── pan.js
-│   │   ├── rationcard.js
-│   │   ├── gasbill.js
-│   │   ├── ebbills.js
-│   │   ├── birthcertification.js
-│   │   ├── employmentletter.js
-│   │   ├── grn.js
-│   │   ├── purchaseorder.js
-│   │   ├── vehiclerc.js
-│   │   ├── salaryslip.js
-│   │   └── rentalagreement.js
-│   ├── helper/
-│   └── templates/
-├── package.json
-└── README.md
+│   ├── index.ts                 # Express server entry point
+│   ├── lib/
+│   │   └── ai.ts                # Vercel AI SDK & OpenAI configuration
+│   ├── generate/                # Specialized document generation modules
+│   ├── fonts/                   # Custom fonts for document rendering
+│   ├── templates/               # Image templates for documents
+│   ├── types/                   # TypeScript interfaces and types
+│   └── helper/                  # Utility functions (e.g., ZIP compression)
+├── docs/                        # Documentation assets (Screenshots, etc.)
+├── .env.example                 # Environment variable template
+└── package.json                 # Project dependencies and scripts
 ```
 
 ---
 
-## API Endpoints
+## 🔌 API Reference
 
-### GET `/options`
+### `GET /options`
 
-Returns the list of available document types.
+Returns the list of available document types for the frontend dropdown.
 
-**Response:**
+### `POST /generate`
 
-```json
-[
-  { "value": "pan_trust", "label": "PAN (Trust)" },
-  { "value": "pan_company", "label": "PAN (Company)" },
-  { "value": "ration_card", "label": "Ration Card" },
-  ...
-]
-```
+Generates the requested documents.
 
-### POST `/generate`
-
-Generates documents based on the selected type and sample count.
-
-**Request Body:**
-
-```json
-{
-  "type": "pan_trust",
-  "sample": 5
-}
-```
-
-**Response:**
-A ZIP file containing the generated documents.
+- **Body**: `{ "type": "document_type", "sample": number }`
+- **Returns**: A ZIP file containing the generated PNG/PDF documents.
 
 ---
 
-## Frontend
+## 🧪 AI Configuration Details
 
-- **HTML:** Simple form to select document type and count.
-- **Bootstrap 5:** For styling and responsive layout.
-- **Progress bar:** Indicates generation progress.
-- **Download:** Automatically triggers ZIP download after generation.
+This project uses the **Vercel AI SDK** with OpenAI.
+
+- **Efficiency**: Employs batch generation to minimize API calls and latency.
+- **Validation**: Uses **Zod** schemas to ensure the AI-generated data strictly adheres to the required document formats.
+- **Cost**: Optimized with `gpt-4o-mini` for a perfect balance of intelligence and cost-efficiency.
+
+---
+
+## 🎨 Technology Stack
+
+- **Backend**: Node.js, Express, TypeScript
+- **AI**: Vercel AI SDK, OpenAI API, Zod
+- **Rendering**: Canvas API (for images), PDFKit (for PDFs)
+- **Frontend**: HTML5, Tailwind CSS, Lucide Icons
+- **Bundling**: TypeScript Compiler (TSC), TSX
 
 ---
 
-## Usage
+## 📄 License
 
-1. Open your browser and navigate to `http://localhost:8000`.
-2. Select the document type from the dropdown.
-3. Enter the number of samples.
-4. Click **Generate**.
-5. Wait for the progress bar to complete and download the ZIP file.
+This project is licensed under the [MIT License](LICENSE).
 
 ---
+
+**Built with ❤️ by [Kiran Balaji](https://github.com/kiranbalaji71)**
